@@ -1,108 +1,80 @@
-# CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
+# MPC Control
+## Self-Driving Car Engineer Nanodegree Program
 
----
+## Model
+
+The model state is:
+
+* px: X-position of the vehicle in the forward direction
+* py: Y-position of the vehicle in the lateral direction
+* psi: Orientation of the vehicle
+* v: Velocity of the vehicle
+
+The actuators of the vehicle are:
+
+* deltaPsi: Steering angle
+* a: Acceleration
+
+The update equations for our model used to predict future states are:
+* px(t+1)  = px(t) + v(t) \* cos(psi(t)) \* dt
+* py(t+1)  = py(t) + v(t) \* sin(psi(t)) \* dt
+* psi(t+1) = psi(t) + v(t) / Lf \* deltaPsi \* dt
+* v(t+1)   = v(t) + a \* dt;
+
+Where `dt` is the timestep between predictions and `Lf` is the distance between the front and the center of gravity of the vehicle, which determines its turning radius.  
+Within the simulator, the slip angle of the vehicle is zero as long as it is on the paved road, so cornering forces are not taken into account.
+
+## Timesteps and Frequency
+
+The final timestep value for the controller is 15 with a frequency of 0.12 seconds.
+
+I started out with 8 steps at 0.1 seconds which provided decent results at low speeds, but quickly failed when the velocity was increased.
+The car reacted too slowly to directional changes in the road and would run out of bounds on sharp turns. Additionally, the vehicle would tend to oscillate on fast straights and not deal well with latency (see below).
+
+If either parameter was set too high, the vehicle would tend to drive too conservatively as it was planning its path down the road too far in advance to still maintain a high speed.
+
+## Cost Function
+
+In order to find the path with the lowest associated cost while maintaining a fairly fast speed, the following parameters where penalized with different factors
+* Cross Track Error^2 * `2000`
+* Orientation Error^2 * `1500`
+* Deviation from reference velocity^2 * `1`. Reference velocity is 95 mp/h for safe laps around the track and 100 mp/h for "race trim".
+* Use of steering actuator^2 * `20000`
+* Use of acceleration actuator^2 * `1`
+* Difference of sequential actuations for steering^2 * `2`
+* Difference of sequential actuations for acceleration^2 * `1`
+
+Giving considerably more weight to the cross track and orientation errors kept the vehicle on the road well at low speeds.
+However, with increasing speed, oscillation would become worse and eventually kick the vehicle off the road. Severly penalizing the use of the steering actuator resulted in overall more smooth steering inputs and a stable drive.
+A slightly larger penalty for the difference in sequential steering actuations was applied to keep constant cycles of full acceleration and braking at bay if the vehicle's reference speed is set below 100.
+
+## Polynomial Fitting and MPC Preprocessing
+
+The provided waypoints are transformed into vehicle space and then fitted to a polynomial. I use a 2-dimensional polynomial to fit the path since it gave more robust results than a 3-dimensional fit. With the planned path in vehicle space, the initial x/y position and orientation of the vehicle can be set to zero and fed into the MPC solver as part of the state vector.
+
+## Dealing with Latency
+
+In order to simulate a system that is closer to real-life, latency of 0.1 seconds between a cycle of the MPC controller and the actual actuation was artificially introduced.  
+Predictably, this had two distinct effects:
+* it affected driving at high speeds towards tight turns the most - the vehicle would react too late to recognizing a sharp turn and run off-road
+* any existing oscillation was amplified
+
+
+ To account for this, I made the model drive more conservatively by increasing the amount of track that it looks ahead via the timestep parameter (see above). Additionally, I further increased the penalty to the use of the steering actuator.
 
 ## Dependencies
 
 * cmake >= 3.5
- * All OSes: [click here for installation instructions](https://cmake.org/install/)
-* make >= 4.1(mac, linux), 3.81(Windows)
-  * Linux: make is installed by default on most Linux distros
-  * Mac: [install Xcode command line tools to get make](https://developer.apple.com/xcode/features/)
-  * Windows: [Click here for installation instructions](http://gnuwin32.sourceforge.net/packages/make.htm)
+* make >= 4.1
 * gcc/g++ >= 5.4
-  * Linux: gcc / g++ is installed by default on most Linux distros
-  * Mac: same deal as make - [install Xcode command line tools]((https://developer.apple.com/xcode/features/)
-  * Windows: recommend using [MinGW](http://www.mingw.org/)
-* [uWebSockets](https://github.com/uWebSockets/uWebSockets)
-  * Run either `install-mac.sh` or `install-ubuntu.sh`.
-  * If you install from source, checkout to commit `e94b6e1`, i.e.
-    ```
-    git clone https://github.com/uWebSockets/uWebSockets
-    cd uWebSockets
-    git checkout e94b6e1
-    ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
-
-* **Ipopt and CppAD:** Please refer to [this document](https://github.com/udacity/CarND-MPC-Project/blob/master/install_Ipopt_CppAD.md) for installation instructions.
-* [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page). This is already part of the repo so you shouldn't have to worry about it.
-* Simulator. You can download these from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
-* Not a dependency but read the [DATA.md](./DATA.md) for a description of the data sent back from the simulator.
-
+* uWebSockets == 0.14, but the master branch will probably work just fine
+* Ipopt
+* CppAD
+* Eigen. This is already part of the repo so you shouldn't have to worry about it.
 
 ## Basic Build Instructions
 
 1. Clone this repo.
 2. Make a build directory: `mkdir build && cd build`
 3. Compile: `cmake .. && make`
-4. Run it: `./mpc`.
-
-## Tips
-
-1. It's recommended to test the MPC on basic examples to see if your implementation behaves as desired. One possible example
-is the vehicle starting offset of a straight line (reference). If the MPC implementation is correct, after some number of timesteps
-(not too many) it should find and track the reference line.
-2. The `lake_track_waypoints.csv` file has the waypoints of the lake track. You could use this to fit polynomials and points and see of how well your model tracks curve. NOTE: This file might be not completely in sync with the simulator so your solution should NOT depend on it.
-3. For visualization this C++ [matplotlib wrapper](https://github.com/lava/matplotlib-cpp) could be helpful.)
-4.  Tips for setting up your environment are available [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-5. **VM Latency:** Some students have reported differences in behavior using VM's ostensibly a result of latency.  Please let us know if issues arise as a result of a VM environment.
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
+4. Run it: `./mpc`
